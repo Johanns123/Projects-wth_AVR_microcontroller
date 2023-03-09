@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdbool.h>
+#include <avr/interrupt.h>
 
 #define SR_DAT   PB0
 #define SR_LATCH PB1
@@ -10,6 +11,12 @@
 /* --- Constantes --- */
 #define    RS       0x01                       /* endereço do pino register select */
 #define    EN       0x02                       /* endereço do pino de enable */
+#define NUM_SHIFT_REGISTERS 2  // Quantidade de shift registers em cascata
+
+enum OPERATOON_MODE
+{
+  BOTH, ONLY_FIRST, ONLY_SECOND
+};
 
 /* ========================================================================= */
 /* --- Protótipo das Funções --- */
@@ -21,6 +28,33 @@ void setup(void);
 void loop(void);
 void shift_reg(uint8_t word);
 void latch(void);
+void shiftOutCascade(uint8_t data_second_shift, uint8_t data_first_shift, uint8_t mode) ;
+
+//static uint8_t contador = 0;
+
+ISR(TIMER0_OVF_vect)
+{
+  TCNT0 = 0x06;
+  static uint16_t contador0 = 1, contador1 = 1, data = 0, i = 0;
+
+  if(contador0 < 250) contador0++;
+
+  else
+  {
+    contador0 = 1;
+    data ^= 1;
+    shiftOutCascade((data)<<i, 0, ONLY_SECOND);
+  }
+
+  if(contador1 < 500) contador1++;
+
+  else
+  {
+    contador1 = 1;
+    i++;
+    if(i > 7) i = 0;
+  }
+}
 
 int main(void)
 {
@@ -31,6 +65,10 @@ int main(void)
 void setup() {
   DDRB  |= (1 << SR_DAT) | (1 << SR_CLK) | (1 << SR_LATCH);
   PORTB &= ~((1 << SR_DAT) | (1 << SR_CLK) | (1 << SR_LATCH));
+  TCCR0B |= (1<<CS00) | (1<<CS01);
+  TCNT0 = 0x06; //contagem de 1ms
+  TIMSK0 = 1;
+  sei(); 
   lcdSER_init();                               /* inicializa LCD */
   lcdSER_write('W');                           /* envia 'W' */
   lcdSER_write('R');                           /* envia 'R' */
@@ -59,15 +97,9 @@ void loop() {
   _delay_ms(250);                             /* aguarda */
   lcdSER_clear();                            /* limpa LCD */
   _delay_ms(250);                             /* aguarda */
- 
-  /*static uint16_t contador = 0;
-
-  shift_reg(contador >> 8); //shiftregister1
-  shift_reg(contador & 0xff); //shiftregister2
-  latch();
-  _delay_ms(50);
   
-  contador++;*/
+  //shiftOutCascade(contador, 0, ONLY_SECOND);
+  //contador++;
 }
 
 /* ========================================================================= */
@@ -75,23 +107,23 @@ void loop() {
 void lcdSER_write(char chr)
 {
 
-  shift_reg((chr&0xF0)|RS);                    /* limpa nibble menos significativo do chr e seta RS */
+  shiftOutCascade(0, (chr&0xF0)|RS, ONLY_FIRST);
   latch();
-  shift_reg((chr&0xF0)|RS|EN);                 /* seta enable para enviar nibble mais significativo */
+  shiftOutCascade(0, (chr&0xF0)|RS|EN, ONLY_FIRST);                 /* seta enable para enviar nibble mais significativo */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
-  shift_reg(((chr&0xF0)|RS)&~EN);                /* clear enable */
+  shiftOutCascade(0, ((chr&0xF0)|RS)&~EN, ONLY_FIRST);                /* clear enable */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
   
   chr <<= 4;                                   /* atualiza chr para enviar nibble menos significativo */
 
-  shift_reg(chr|RS);                           /* seta RS */
+  shiftOutCascade(0, chr|RS, ONLY_FIRST);                           /* seta RS */
   latch();
-  shift_reg(chr|RS|EN);                        /* seta enable para enviar nibble menos significativo */
+  shiftOutCascade(0, chr|RS|EN, ONLY_FIRST);                        /* seta enable para enviar nibble menos significativo */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
-  shift_reg((chr|RS)&~EN);                       /* clear enable */
+  shiftOutCascade(0, (chr|RS)&~EN, ONLY_FIRST);                       /* clear enable */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
   
@@ -102,12 +134,13 @@ void lcdSER_write(char chr)
 /* --- Envia comandos para LCD --- */
 void lcdSER_cmd(unsigned char cmd)
 {
-  shift_reg(cmd&~RS);                          /* clear RS */
+  //shift_reg(0b00000100);
+  shiftOutCascade(0, cmd&~RS, ONLY_FIRST);                          /* clear RS */
   latch();
-  shift_reg(cmd|EN);                           /* seta enable para envio do comando */
+  shiftOutCascade(0, cmd|EN, ONLY_FIRST);                           /* seta enable para envio do comando */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
-  shift_reg(cmd&~EN);                          /* limpa enable */
+  shiftOutCascade(0, cmd&~EN, ONLY_FIRST);                          /* limpa enable */
   latch();
   _delay_us(1200);                              /* aguarda 1,2ms */
 
@@ -159,11 +192,42 @@ void shift_reg(uint8_t word)
     PORTB &= ~(1<<SR_CLK);
     //_delay_ms(1);
   }
-  PORTB &= ~(1 << SR_DAT);
+  //PORTB &= ~(1 << SR_DAT);
 }
 
 void latch(void)
 {
   PORTB |= (1<< SR_LATCH);
+  _delay_us(200);
   PORTB &= ~(1 << SR_LATCH);
+}
+
+void shiftOutCascade(uint8_t data_second_shift, uint8_t data_first_shift, uint8_t mode) 
+{
+  // Envia os dados para cada shift register em cascata
+  static uint8_t data1 = 0, data2 = 0;
+
+  if(mode == BOTH)
+  {
+    shift_reg(data_second_shift);
+    shift_reg(data_first_shift);
+    data1 = data_first_shift;
+    data2 = data_second_shift;
+  }
+
+  else if(mode == ONLY_FIRST)
+  {
+    shift_reg(data2);
+    shift_reg(data_first_shift);
+    data1 = data_first_shift;
+  }
+
+  else if(mode == ONLY_SECOND)
+  {
+    shift_reg(data_second_shift);
+    shift_reg(data1);
+    data2 = data_second_shift;
+  }
+  // Atualiza os registradores dos shift registers
+  latch();
 }
