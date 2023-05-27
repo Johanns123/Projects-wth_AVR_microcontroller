@@ -70,13 +70,15 @@ void setup() {
   TIMSK0 = 1;
   sei(); 
   lcdSER_init();                               /* inicializa LCD */
-  lcdSER_write('W');                           /* envia 'W' */
-  lcdSER_write('R');                           /* envia 'R' */
-  lcdSER_write(' ');                           /* envia ' ' */
-  lcdSER_write('K');                           /* envia 'K' */
-  lcdSER_write('i');                           /* envia 'i' */
-  lcdSER_write('t');                           /* envia 't' */
-  lcdSER_write('s');                           /* envia 's' */
+  lcdSER_write('I');                           
+  lcdSER_write('H');                           
+  lcdSER_write('M');                           
+  lcdSER_write(' ');                           
+  lcdSER_write('P');                           
+  lcdSER_write('A');                           
+  lcdSER_write('N');                           
+  lcdSER_write('E');                           
+  lcdSER_write('L');
   _delay_ms(500);                               /* aguarda */
   lcdSER_clear();                              /* limpa LCD */
 }
@@ -205,7 +207,7 @@ void latch(void)
 void shiftOutCascade(uint8_t data_second_shift, uint8_t data_first_shift, uint8_t mode) 
 {
   // Envia os dados para cada shift register em cascata
-  static uint8_t data1 = 0, data2 = 0;
+  static uint8_t data1 = 0, data2 = 0; //dados de memoria quando um shift register nao eh alterado
 
   if(mode == BOTH)
   {
